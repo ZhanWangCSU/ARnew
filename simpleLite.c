@@ -78,6 +78,7 @@
 #define VIEW_SCALEFACTOR		1.0         // Units received from ARToolKit tracking will be multiplied by this factor before being used in OpenGL drawing.
 #define VIEW_DISTANCE_MIN		40.0        // Objects closer to the camera than this will not be displayed. OpenGL units.
 #define VIEW_DISTANCE_MAX		10000.0     // Objects further away from the camera than this will not be displayed. OpenGL units.
+#define NUMBER_OF_MARKERS           5
 
 // ============================================================================
 //	Global variables
@@ -90,29 +91,32 @@ static int windowHeight = 480;                  // Initial window height, also u
 static int windowDepth = 32;					// Fullscreen mode bit depth.
 static int windowRefresh = 0;					// Fullscreen mode refresh rate. Set to 0 to use default rate.
 
+
+
 // Image acquisition.
-static ARUint8		*gARTImage = NULL;
-static int          gARTImageSavePlease = FALSE;
-
+static ARUint8		                              *gARTImage[NUMBER_OF_MARKERS] = {NULL};
+static int                               gARTImageSavePlease[NUMBER_OF_MARKERS] = {FALSE};
 // Marker detection.
-static ARHandle		*gARHandle = NULL;
-static ARPattHandle	*gARPattHandle = NULL;
-static long			gCallCountMarkerDetect = 0;
+static ARHandle		                              *gARHandle[NUMBER_OF_MARKERS] = {NULL};
+static ARPattHandle	                          *gARPattHandle[NUMBER_OF_MARKERS] = {NULL};
+static long			                  gCallCountMarkerDetect[NUMBER_OF_MARKERS] = {0};
+static ARParamLT                                  *gCparamLT[NUMBER_OF_MARKERS] = {NULL};
+static ARGL_CONTEXT_SETTINGS_REF               gArglSettings[NUMBER_OF_MARKERS] = {NULL};
+static int                                       imageNumber[NUMBER_OF_MARKERS] = {0};
+static ARdouble                                          err[NUMBER_OF_MARKERS] = {0};
+static int                                                 j[NUMBER_OF_MARKERS] = {0};
+static int                                                 k[NUMBER_OF_MARKERS] = {0};
+static ARdouble                                            p[NUMBER_OF_MARKERS][16];
+static ARdouble                                            m[NUMBER_OF_MARKERS][16];
+static AR_LABELING_THRESH_MODE                    threshMode[NUMBER_OF_MARKERS];
 
-// Transformation matrix retrieval.
-static AR3DHandle	*gAR3DHandle = NULL;
-//static ARdouble	gPatt_width     = 80.0;	// Per-marker, but we are using only 1 marker.
-//static ARdouble	gPatt_trans[3][4];		// Per-marker, but we are using only 1 marker.
-//static int		gPatt_found = FALSE;	// Per-marker, but we are using only 1 marker.
-//static int		gPatt_id;				// Per-marker, but we are using only 1 marker.
 
-// Drawing.
-static ARParamLT *gCparamLT = NULL;
-static ARGL_CONTEXT_SETTINGS_REF gArglSettings = NULL;
+static int  i;
 static int gShowHelp = 1;
 static int gShowMode = 1;
 static int gDrawRotate = FALSE;
 static float gDrawRotateAngle = 0;			// For use in drawing.
+
 
 
 // ============================================================================
@@ -126,20 +130,23 @@ static void printMode();
 
 typedef struct
 {
+    AR3DHandle *gAR3DHandle;
     char *patt_name;
     int patt_id;
     int gPatt_found;
-//    int model_id;
-//    int visible;
     double width;
     double center[2];
     double trans[3][4];
-
 }
 OBJECT_T;
 
-OBJECT_T  object[2] = {{"Data/hiro.patt", FALSE, 0 , 80.0 , {0.0, 0.0}},
-                       {"Data/Kanji.patt", FALSE, 0 , 80.0 , {0.0, 0.0}}};
+
+
+OBJECT_T  object[NUMBER_OF_MARKERS] = {{ NULL,   "Data/kanji.patt",  FALSE, 0 , 80.0 , {0.0, 0.0}},
+                                       { NULL,    "Data/hiro.patt",  FALSE, 0 , 80.0 , {0.0, 0.0}},
+                                       { NULL, "Data/sample1.patt",  FALSE, 0 , 80.0 , {0.0, 0.0}},
+                                       { NULL, "Data/sample2.patt",  FALSE, 0 , 80.0 , {0.0, 0.0}},
+                                       { NULL, "Data/marker16.pat",  FALSE, 0 , 80.0 , {0.0, 0.0}}};
 
 // ============================================================================
 //	Functions
@@ -148,26 +155,99 @@ OBJECT_T  object[2] = {{"Data/hiro.patt", FALSE, 0 , 80.0 , {0.0, 0.0}},
 // Something to look at, draw a rotating colour cube.
 static void DrawLine(void)
 {
-	glBegin(GL_LINES);
-	glLineWidth(10.0f);
+	const GLfloat lineWidth = 100.0;
+	glLineWidth(lineWidth);
+    glBegin(GL_LINES);
 	glColor4ub(0, 220, 255, 120);
-	GLfloat y;
-	GLfloat lastx=0.0f, lasty=0.0f, lastz=0.0f;
-	for (y=-100.0f; y<100.0f; y+=1.0f)
+	GLfloat x;
+	GLfloat lastx = 300.0f, lasty = 135.0f, lastz = 0.0f;
+	for (x = -700.0f; x < 300.0f; x += 1.0f)
     {
         glVertex3f(lastx,lasty,lastz);
-        lastx = 0.0f;
-        lasty = y;
+        lastx = x;
+        lasty = 135.0f;
         lastz = 0.0f;
     }
     glEnd();
 }
 // Something to look at, draw a rotating colour Line.
 
-static void DrawArrow(void)
+static void DrawLine1(void)
+{
+	const GLfloat lineWidth = 100.0;
+	glLineWidth(lineWidth);
+    glBegin(GL_LINES);
+	glColor4ub(0, 220, 255, 120);
+	GLfloat x;
+	GLfloat lastx=900.0f, lasty=135.0f, lastz=0.0f;
+	for (x = -100.0f; x < 900.0f; x += 1.0f)
+    {
+        glVertex3f(lastx,lasty,lastz);
+        lastx = x;
+        lasty = 135.0f;
+        lastz = 0.0f;
+    }
+    glEnd();
+}
+
+static void DrawLine2(void)
+{
+	const GLfloat lineWidth = 100.0;
+	glLineWidth(lineWidth);
+    glBegin(GL_LINES);
+	glColor4ub(0, 220, 255, 120);
+	GLfloat x;
+	GLfloat lastx = 100.0f, lasty = 135.0f, lastz = 0.0f;
+	for (x = -900.0f; x < 100.0f; x += 1.0f)
+    {
+        glVertex3f(lastx,lasty,lastz);
+        lastx = x;
+        lasty = 135.0f;
+        lastz = 0.0f;
+    }
+    glEnd();
+}
+
+static void DrawLine3(void)
+{
+	const GLfloat lineWidth = 100.0;
+	glLineWidth(lineWidth);
+    glBegin(GL_LINES);
+	glColor4ub(0, 220, 255, 120);
+	GLfloat x;
+	GLfloat lastx = 500.0f, lasty = 135.0f, lastz = 0.0f;
+	for (x = -500.0f; x < 500.0f; x += 1.0f)
+    {
+        glVertex3f(lastx,lasty,lastz);
+        lastx = x;
+        lasty = 135.0f;
+        lastz = 0.0f;
+    }
+    glEnd();
+}
+
+static void DrawLine4(void)
+{
+	const GLfloat lineWidth = 100.0;
+	glLineWidth(lineWidth);
+    glBegin(GL_LINES);
+	glColor4ub(0, 220, 255, 120);
+	GLfloat x;
+	GLfloat lastx = 700.0f, lasty = 135.0f, lastz = 0.0f;
+	for (x = -300.0f; x < 700.0f; x += 1.0f)
+    {
+        glVertex3f(lastx,lasty,lastz);
+        lastx = x;
+        lasty = 135.0f;
+        lastz = 0.0f;
+    }
+    glEnd();
+}
+
+
+static void DrawArrow1(void)
 {
     glBegin(GL_QUADS);
-
     // Green
     glColor4ub(     0,    255,      0,   255);
     // Top face (y = 1.0f)
@@ -220,21 +300,287 @@ static void DrawArrow(void)
     glEnd();
 }
 
+static void DrawArrow2(void)
+{
+    glBegin(GL_QUADS);
 
-static int setupCamera(const char *cparam_name, char *vconf, ARParamLT **cparamLT_p, ARHandle **arhandle, AR3DHandle **ar3dhandle)
+    // Green
+    glColor4ub(     0,    255,      0,   255);
+    // Top face (y = 1.0f)
+    glVertex3f( 40.0f,  40.0f, -40.0f + 40.0f);
+    glVertex3f(-40.0f,  40.0f, -40.0f + 40.0f);
+    glVertex3f(-40.0f,  40.0f,  40.0f + 40.0f);
+    glVertex3f( 40.0f,  40.0f,  40.0f + 40.0f);
+
+    // Orange
+    glColor4ub(   122,    255,      0,   255);
+    // Bottom face (y = -1.0f)
+    glVertex3f( 40.0f, -40.0f,  40.0f + 40.0f);
+    glVertex3f(-40.0f, -40.0f,  40.0f + 40.0f);
+    glVertex3f(-40.0f, -40.0f, -40.0f + 40.0f);
+    glVertex3f( 40.0f, -40.0f, -40.0f + 40.0f);
+
+    // Red
+    glColor4ub(   255,      0,      0,   255);
+    // Front face  (z = 1.0f)
+    glVertex3f( 40.0f,  40.0f,  40.0f + 40.0f);
+    glVertex3f(-40.0f,  40.0f,  40.0f + 40.0f);
+    glVertex3f(-40.0f, -40.0f,  40.0f + 40.0f);
+    glVertex3f( 40.0f, -40.0f,  40.0f + 40.0f);
+
+    // Yellow
+    glColor4ub(   255,    122,      0,   255);
+    // Back face (z = -1.0f)
+    glVertex3f( 40.0f, -40.0f, -40.0f + 40.0f);
+    glVertex3f(-40.0f, -40.0f, -40.0f + 40.0f);
+    glVertex3f(-40.0f,  40.0f, -40.0f + 40.0f);
+    glVertex3f( 40.0f,  40.0f, -40.0f + 40.0f);
+
+    // Blue
+    glColor4ub(     0,      0,    255,   255);
+    // Left face (x = -1.0f)
+    glVertex3f(-40.0f,  40.0f,  40.0f + 40.0f);
+    glVertex3f(-40.0f,  40.0f, -40.0f + 40.0f);
+    glVertex3f(-40.0f, -40.0f, -40.0f + 40.0f);
+    glVertex3f(-40.0f, -40.0f,  40.0f + 40.0f);
+
+    // Magenta
+    glColor4ub(   255,      0,    122,   255);
+    // Right face (x = 1.0f)
+    glVertex3f( 40.0f,  40.0f, -40.0f + 40.0f);
+    glVertex3f( 40.0f,  40.0f,  40.0f + 40.0f);
+    glVertex3f( 40.0f, -40.0f,  40.0f + 40.0f);
+    glVertex3f( 40.0f, -40.0f, -40.0f + 40.0f);
+
+    //glTranslatef(0.0f, 0.0f,    50.0f);
+    glEnd();
+}
+
+
+static void DrawArrow3(void)
+{
+    glBegin(GL_QUADS);
+
+    // Green
+    glColor4ub(     0,    255,      0,   255);
+    // Top face (y = 1.0f)
+    glVertex3f( 40.0f,  40.0f, -40.0f + 40.0f);
+    glVertex3f(-40.0f,  40.0f, -40.0f + 40.0f);
+    glVertex3f(-40.0f,  40.0f,  40.0f + 40.0f);
+    glVertex3f( 40.0f,  40.0f,  40.0f + 40.0f);
+
+    // Orange
+    glColor4ub(   122,    255,      0,   255);
+    // Bottom face (y = -1.0f)
+    glVertex3f( 40.0f, -40.0f,  40.0f + 40.0f);
+    glVertex3f(-40.0f, -40.0f,  40.0f + 40.0f);
+    glVertex3f(-40.0f, -40.0f, -40.0f + 40.0f);
+    glVertex3f( 40.0f, -40.0f, -40.0f + 40.0f);
+
+    // Red
+    glColor4ub(   255,      0,      0,   255);
+    // Front face  (z = 1.0f)
+    glVertex3f( 40.0f,  40.0f,  40.0f + 40.0f);
+    glVertex3f(-40.0f,  40.0f,  40.0f + 40.0f);
+    glVertex3f(-40.0f, -40.0f,  40.0f + 40.0f);
+    glVertex3f( 40.0f, -40.0f,  40.0f + 40.0f);
+
+    // Yellow
+    glColor4ub(   255,    122,      0,   255);
+    // Back face (z = -1.0f)
+    glVertex3f( 40.0f, -40.0f, -40.0f + 40.0f);
+    glVertex3f(-40.0f, -40.0f, -40.0f + 40.0f);
+    glVertex3f(-40.0f,  40.0f, -40.0f + 40.0f);
+    glVertex3f( 40.0f,  40.0f, -40.0f + 40.0f);
+
+    // Blue
+    glColor4ub(     0,      0,    255,   255);
+    // Left face (x = -1.0f)
+    glVertex3f(-40.0f,  40.0f,  40.0f + 40.0f);
+    glVertex3f(-40.0f,  40.0f, -40.0f + 40.0f);
+    glVertex3f(-40.0f, -40.0f, -40.0f + 40.0f);
+    glVertex3f(-40.0f, -40.0f,  40.0f + 40.0f);
+
+    // Magenta
+    glColor4ub(   255,      0,    122,   255);
+    // Right face (x = 1.0f)
+    glVertex3f( 40.0f,  40.0f, -40.0f + 40.0f);
+    glVertex3f( 40.0f,  40.0f,  40.0f + 40.0f);
+    glVertex3f( 40.0f, -40.0f,  40.0f + 40.0f);
+    glVertex3f( 40.0f, -40.0f, -40.0f + 40.0f);
+
+    //glTranslatef(0.0f, 0.0f,    50.0f);
+    glEnd();
+}
+
+static void DrawArrow4(void)
+{
+    glBegin(GL_QUADS);
+
+    // Green
+    glColor4ub(     0,    255,      0,   255);
+    // Top face (y = 1.0f)
+    glVertex3f( 40.0f,  40.0f, -40.0f + 40.0f);
+    glVertex3f(-40.0f,  40.0f, -40.0f + 40.0f);
+    glVertex3f(-40.0f,  40.0f,  40.0f + 40.0f);
+    glVertex3f( 40.0f,  40.0f,  40.0f + 40.0f);
+
+    // Orange
+    glColor4ub(   122,    255,      0,   255);
+    // Bottom face (y = -1.0f)
+    glVertex3f( 40.0f, -40.0f,  40.0f + 40.0f);
+    glVertex3f(-40.0f, -40.0f,  40.0f + 40.0f);
+    glVertex3f(-40.0f, -40.0f, -40.0f + 40.0f);
+    glVertex3f( 40.0f, -40.0f, -40.0f + 40.0f);
+
+    // Red
+    glColor4ub(   255,      0,      0,   255);
+    // Front face  (z = 1.0f)
+    glVertex3f( 40.0f,  40.0f,  40.0f + 40.0f);
+    glVertex3f(-40.0f,  40.0f,  40.0f + 40.0f);
+    glVertex3f(-40.0f, -40.0f,  40.0f + 40.0f);
+    glVertex3f( 40.0f, -40.0f,  40.0f + 40.0f);
+
+    // Yellow
+    glColor4ub(   255,    122,      0,   255);
+    // Back face (z = -1.0f)
+    glVertex3f( 40.0f, -40.0f, -40.0f + 40.0f);
+    glVertex3f(-40.0f, -40.0f, -40.0f + 40.0f);
+    glVertex3f(-40.0f,  40.0f, -40.0f + 40.0f);
+    glVertex3f( 40.0f,  40.0f, -40.0f + 40.0f);
+
+    // Blue
+    glColor4ub(     0,      0,    255,   255);
+    // Left face (x = -1.0f)
+    glVertex3f(-40.0f,  40.0f,  40.0f + 40.0f);
+    glVertex3f(-40.0f,  40.0f, -40.0f + 40.0f);
+    glVertex3f(-40.0f, -40.0f, -40.0f + 40.0f);
+    glVertex3f(-40.0f, -40.0f,  40.0f + 40.0f);
+
+    // Magenta
+    glColor4ub(   255,      0,    122,   255);
+    // Right face (x = 1.0f)
+    glVertex3f( 40.0f,  40.0f, -40.0f + 40.0f);
+    glVertex3f( 40.0f,  40.0f,  40.0f + 40.0f);
+    glVertex3f( 40.0f, -40.0f,  40.0f + 40.0f);
+    glVertex3f( 40.0f, -40.0f, -40.0f + 40.0f);
+
+    //glTranslatef(0.0f, 0.0f,    50.0f);
+    glEnd();
+}
+
+static void DrawArrow5(void)
+{
+    glBegin(GL_QUADS);
+
+    // Green
+    glColor4ub(     0,    255,      0,   255);
+    // Top face (y = 1.0f)
+    glVertex3f( 40.0f,  40.0f, -40.0f + 40.0f);
+    glVertex3f(-40.0f,  40.0f, -40.0f + 40.0f);
+    glVertex3f(-40.0f,  40.0f,  40.0f + 40.0f);
+    glVertex3f( 40.0f,  40.0f,  40.0f + 40.0f);
+
+    // Orange
+    glColor4ub(   122,    255,      0,   255);
+    // Bottom face (y = -1.0f)
+    glVertex3f( 40.0f, -40.0f,  40.0f + 40.0f);
+    glVertex3f(-40.0f, -40.0f,  40.0f + 40.0f);
+    glVertex3f(-40.0f, -40.0f, -40.0f + 40.0f);
+    glVertex3f( 40.0f, -40.0f, -40.0f + 40.0f);
+
+    // Red
+    glColor4ub(   255,      0,      0,   255);
+    // Front face  (z = 1.0f)
+    glVertex3f( 40.0f,  40.0f,  40.0f + 40.0f);
+    glVertex3f(-40.0f,  40.0f,  40.0f + 40.0f);
+    glVertex3f(-40.0f, -40.0f,  40.0f + 40.0f);
+    glVertex3f( 40.0f, -40.0f,  40.0f + 40.0f);
+
+    // Yellow
+    glColor4ub(   255,    122,      0,   255);
+    // Back face (z = -1.0f)
+    glVertex3f( 40.0f, -40.0f, -40.0f + 40.0f);
+    glVertex3f(-40.0f, -40.0f, -40.0f + 40.0f);
+    glVertex3f(-40.0f,  40.0f, -40.0f + 40.0f);
+    glVertex3f( 40.0f,  40.0f, -40.0f + 40.0f);
+
+    // Blue
+    glColor4ub(     0,      0,    255,   255);
+    // Left face (x = -1.0f)
+    glVertex3f(-40.0f,  40.0f,  40.0f + 40.0f);
+    glVertex3f(-40.0f,  40.0f, -40.0f + 40.0f);
+    glVertex3f(-40.0f, -40.0f, -40.0f + 40.0f);
+    glVertex3f(-40.0f, -40.0f,  40.0f + 40.0f);
+
+    // Magenta
+    glColor4ub(   255,      0,    122,   255);
+    // Right face (x = 1.0f)
+    glVertex3f( 40.0f,  40.0f, -40.0f + 40.0f);
+    glVertex3f( 40.0f,  40.0f,  40.0f + 40.0f);
+    glVertex3f( 40.0f, -40.0f,  40.0f + 40.0f);
+    glVertex3f( 40.0f, -40.0f, -40.0f + 40.0f);
+
+    //glTranslatef(0.0f, 0.0f,    50.0f);
+    glEnd();
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// ============================================================================
+//	Functions
+// ============================================================================
+static int openVideo(char *vconf)
+{
+    if (arVideoOpen(vconf) < 0)
+    {
+    	ARLOGe("setupCamera(): Unable to open connection to camera.\n");
+    	return (FALSE);
+	}
+    return (TRUE);
+}
+
+static int (capStart(void))
+{
+    if (arVideoCapStart() != 0)
+	{
+    	ARLOGe("setupCamera(): Unable to begin camera data capture.\n");
+		return (FALSE);
+	}
+	return (TRUE);
+}
+
+
+static int setupCamera1(const char *cparam_name, ARParamLT *cparamLT_p2[], ARHandle *arhandle2[], AR3DHandle *ar3dhandle2[])
 {
     ARParam			cparam;
 	int				xsize, ysize;
     AR_PIXEL_FORMAT pixFormat;
-
     // Open the video path.
-    if (arVideoOpen(vconf) < 0) {
-    	ARLOGe("setupCamera(): Unable to open connection to camera.\n");
-    	return (FALSE);
-	}
 
     // Find the size of the window.
-    if (arVideoGetSize(&xsize, &ysize) < 0) {
+    if (arVideoGetSize(&xsize, &ysize) < 0)
+    {
         ARLOGe("setupCamera(): Unable to determine camera frame size.\n");
         arVideoClose();
         return (FALSE);
@@ -243,70 +589,78 @@ static int setupCamera(const char *cparam_name, char *vconf, ARParamLT **cparamL
 
 	// Get the format in which the camera is returning pixels.
 	pixFormat = arVideoGetPixelFormat();
-	if (pixFormat == AR_PIXEL_FORMAT_INVALID) {
+	if (pixFormat == AR_PIXEL_FORMAT_INVALID)
+	{
     	ARLOGe("setupCamera(): Camera is using unsupported pixel format.\n");
         arVideoClose();
 		return (FALSE);
 	}
 
-	// Load the camera parameters, resize for the window and init.
-    if (arParamLoad(cparam_name, 1, &cparam) < 0) {
-		ARLOGe("setupCamera(): Error loading parameter file %s for camera.\n", cparam_name);
+    if (arParamLoad(cparam_name, 1, &cparam) < 0)
+    {
+        ARLOGe("setupCamera(): Error loading parameter file %s for camera.\n", cparam_name);
         arVideoClose();
         return (FALSE);
     }
-    if (cparam.xsize != xsize || cparam.ysize != ysize) {
+
+    if (cparam.xsize != xsize || cparam.ysize != ysize)
+    {
         ARLOGw("*** Camera Parameter resized from %d, %d. ***\n", cparam.xsize, cparam.ysize);
         arParamChangeSize(&cparam, xsize, ysize, &cparam);
     }
+
 #ifdef DEBUG
+
     ARLOG("*** Camera Parameter ***\n");
     arParamDisp(&cparam);
 #endif
-    if ((*cparamLT_p = arParamLTCreate(&cparam, AR_PARAM_LT_DEFAULT_OFFSET)) == NULL) {
+
+    if ((*cparamLT_p2 = arParamLTCreate(&cparam, AR_PARAM_LT_DEFAULT_OFFSET)) == NULL)
+    {
         ARLOGe("setupCamera(): Error: arParamLTCreate.\n");
         return (FALSE);
     }
 
-    if ((*arhandle = arCreateHandle(*cparamLT_p)) == NULL) {
+    if ((*arhandle2 = arCreateHandle(*cparamLT_p2)) == NULL)
+    {
         ARLOGe("setupCamera(): Error: arCreateHandle.\n");
         return (FALSE);
     }
-    if (arSetPixelFormat(*arhandle, pixFormat) < 0) {
+
+    if (arSetPixelFormat(*arhandle2, pixFormat) < 0)
+    {
         ARLOGe("setupCamera(): Error: arSetPixelFormat.\n");
         return (FALSE);
     }
-	if (arSetDebugMode(*arhandle, AR_DEBUG_DISABLE) < 0) {
+
+	if (arSetDebugMode(*arhandle2, AR_DEBUG_DISABLE) < 0)
+	{
         ARLOGe("setupCamera(): Error: arSetDebugMode.\n");
         return (FALSE);
     }
-	if ((*ar3dhandle = ar3DCreateHandle(&cparam)) == NULL) {
+
+    if ((*ar3dhandle2 = ar3DCreateHandle(&cparam)) == NULL)
+	{
         ARLOGe("setupCamera(): Error: ar3DCreateHandle.\n");
         return (FALSE);
     }
-
-	if (arVideoCapStart() != 0) {
-    	ARLOGe("setupCamera(): Unable to begin camera data capture.\n");
-		return (FALSE);
-	}
-
-	return (TRUE);
+    return (TRUE);
 }
 
 static int setupMarker(const char *patt_name, int *patt_id, ARHandle *arhandle, ARPattHandle **pattHandle_p)
 {
-    if ((*pattHandle_p = arPattCreateHandle()) == NULL) {
+    if ((*pattHandle_p = arPattCreateHandle()) == NULL)
+    {
         ARLOGe("setupMarker(): Error: arPattCreateHandle.\n");
         return (FALSE);
     }
 
-	// Loading only 1 pattern in this example.
-	if ((*patt_id = arPattLoad(*pattHandle_p, patt_name)) < 0) {
+	if ((*patt_id = arPattLoad(*pattHandle_p, patt_name)) < 0)
+	{
 		ARLOGe("setupMarker(): Error loading pattern file %s.\n", patt_name);
 		arPattDeleteHandle(*pattHandle_p);
 		return (FALSE);
 	}
-
     arPattAttach(arhandle, *pattHandle_p);
 
 	return (TRUE);
@@ -314,23 +668,32 @@ static int setupMarker(const char *patt_name, int *patt_id, ARHandle *arhandle, 
 
 static void cleanup(void)
 {
-	arglCleanup(gArglSettings);
-    gArglSettings = NULL;
-	arPattDetach(gARHandle);
-	arPattDeleteHandle(gARPattHandle);
-	arVideoCapStop();
-	ar3DDeleteHandle(&gAR3DHandle);
-	arDeleteHandle(gARHandle);
-    arParamLTFree(&gCparamLT);
-	arVideoClose();
+    int i;
+    for (i = 0; i < NUMBER_OF_MARKERS; i++)
+    {
+        arglCleanup(gArglSettings[i]);
+        gArglSettings[i] = NULL;
+        arPattDetach(gARHandle[i]);
+        arPattDeleteHandle(gARPattHandle[i]);
+    }
+    arVideoCapStop();
+    for (i = 0; i < NUMBER_OF_MARKERS; i++)
+    {
+        ar3DDeleteHandle(&object[i].gAR3DHandle);
+        arDeleteHandle(gARHandle[i]);
+        arParamLTFree(&gCparamLT[i]);
+    }
+    arVideoClose();
 }
+
+
 
 static void Keyboard(unsigned char key, int x, int y)
 {
 	int mode, threshChange = 0;
     AR_LABELING_THRESH_MODE modea;
-
-	switch (key) {
+	switch (key)
+	{
 		case 0x1B:						// Quit.
 		case 'Q':
 		case 'q':
@@ -342,24 +705,39 @@ static void Keyboard(unsigned char key, int x, int y)
 			break;
 		case 'X':
 		case 'x':
-            arGetImageProcMode(gARHandle, &mode);
-            switch (mode) {
+		    for (i = 0; i < NUMBER_OF_MARKERS; i++)
+            {
+                arGetImageProcMode(gARHandle[i], &mode);
+            }
+            switch (mode)
+            {
                 case AR_IMAGE_PROC_FRAME_IMAGE:  mode = AR_IMAGE_PROC_FIELD_IMAGE; break;
                 case AR_IMAGE_PROC_FIELD_IMAGE:
                 default: mode = AR_IMAGE_PROC_FRAME_IMAGE; break;
             }
-            arSetImageProcMode(gARHandle, mode);
+            for (i = 0; i < NUMBER_OF_MARKERS; i++)
+            {
+                arSetImageProcMode(gARHandle[i], mode);
+            }
 			break;
 		case 'C':
 		case 'c':
-			ARLOGe("*** Camera - %f (frame/sec)\n", (double)gCallCountMarkerDetect/arUtilTimer());
-			gCallCountMarkerDetect = 0;
-			arUtilTimerReset();
-			break;
+            for (i = 0; i < NUMBER_OF_MARKERS; i++)
+            {
+                ARLOGe("*** Camera - %f (frame/sec)\n", (double)gCallCountMarkerDetect[i]/arUtilTimer());
+                gCallCountMarkerDetect[i] = 0;
+                arUtilTimerReset();
+                break;
+			}
+
 		case 'a':
 		case 'A':
-			arGetLabelingThreshMode(gARHandle, &modea);
-            switch (modea) {
+		    for (i = 0; i < NUMBER_OF_MARKERS; i++)
+            {
+                arGetLabelingThreshMode(gARHandle[i], &modea);
+			}
+            switch (modea)
+            {
                 case AR_LABELING_THRESH_MODE_MANUAL:        modea = AR_LABELING_THRESH_MODE_AUTO_MEDIAN; break;
                 case AR_LABELING_THRESH_MODE_AUTO_MEDIAN:   modea = AR_LABELING_THRESH_MODE_AUTO_OTSU; break;
                 case AR_LABELING_THRESH_MODE_AUTO_OTSU:     modea = AR_LABELING_THRESH_MODE_AUTO_ADAPTIVE; break;
@@ -367,7 +745,10 @@ static void Keyboard(unsigned char key, int x, int y)
                 case AR_LABELING_THRESH_MODE_AUTO_BRACKETING:
                 default: modea = AR_LABELING_THRESH_MODE_MANUAL; break;
             }
-            arSetLabelingThreshMode(gARHandle, modea);
+            for (i = 0; i < NUMBER_OF_MARKERS; i++)
+            {
+                arSetLabelingThreshMode(gARHandle[i], modea);
+            }
 			break;
 		case '-':
 			threshChange = -5;
@@ -378,13 +759,19 @@ static void Keyboard(unsigned char key, int x, int y)
 			break;
 		case 'D':
 		case 'd':
-			arGetDebugMode(gARHandle, &mode);
-			arSetDebugMode(gARHandle, !mode);
+            for (i = 0; i < NUMBER_OF_MARKERS; i++)
+            {
+                arGetDebugMode(gARHandle[i], &mode);
+                arSetDebugMode(gARHandle[i], !mode);
+			}
 			break;
         case 's':
         case 'S':
-            if (!gARTImageSavePlease) gARTImageSavePlease = TRUE;
-            break;
+            for (i = 0; i < NUMBER_OF_MARKERS; i++)
+            {
+                if (!gARTImageSavePlease[i]) gARTImageSavePlease[i] = TRUE;
+                break;
+            }
 		case '?':
 		case '/':
             gShowHelp++;
@@ -397,27 +784,29 @@ static void Keyboard(unsigned char key, int x, int y)
 		default:
 			break;
 	}
-	if (threshChange) {
-		int threshhold;
-		arGetLabelingThresh(gARHandle, &threshhold);
-		threshhold += threshChange;
-		if (threshhold < 0) threshhold = 0;
-		if (threshhold > 255) threshhold = 255;
-		arSetLabelingThresh(gARHandle, threshhold);
-	}
 
+	if (threshChange)
+	{
+		for (i = 0; i < NUMBER_OF_MARKERS; i++)
+		{
+            int threshhold[i];
+            arGetLabelingThresh(gARHandle[i], &threshhold[i]);
+            threshhold[i] += threshChange;
+            if (threshhold[i] < 0) threshhold[i] = 0;
+            if (threshhold[i] > 255) threshhold[i] = 255;
+            arSetLabelingThresh(gARHandle[i], threshhold[i]);
+		}
+	}
 }
 
-static void mainLoop(void)
+
+
+static void mainLoop0(void)
 {
-    static int imageNumber = 0;
 	static int ms_prev;
 	int ms;
 	float s_elapsed;
 	ARUint8 *image;
-	ARdouble err;
-
-    int             j, k;
 
 	// Find out how long since mainLoop() last ran.
 	ms = glutGet(GLUT_ELAPSED_TIME);
@@ -425,71 +814,93 @@ static void mainLoop(void)
 	if (s_elapsed < 0.01f) return; // Don't update more often than 100 Hz.
 	ms_prev = ms;
 
-	// Update drawing.
-
 	// Grab a video frame.
 	if ((image = arVideoGetImage()) != NULL)
 	{
-		gARTImage = image;	// Save the fetched image.
-
-        if (gARTImageSavePlease) {
-            char imageNumberText[15];
-            sprintf(imageNumberText, "image-%04d.jpg", imageNumber++);
-            if (arVideoSaveImageJPEG(gARHandle->xsize, gARHandle->ysize, gARHandle->arPixelFormat, gARTImage, imageNumberText, 75, 0) < 0) {
-                ARLOGe("Error saving video image.\n");
+        for (i = 0; i < NUMBER_OF_MARKERS; i++)
+        {
+            gARTImage[i] = image;	// Save the fetched image.
+            if (gARTImageSavePlease[i])
+            {
+                char imageNumberText[i][15];
+                sprintf(imageNumberText[i], "image-%04d.jpg", imageNumber[i]++);
+                if (arVideoSaveImageJPEG(gARHandle[i]->xsize, gARHandle[i]->ysize, gARHandle[i]->arPixelFormat, gARTImage[i], imageNumberText[i], 75, 0) < 0)
+                {
+                    ARLOGe("Error saving video image.\n");
+                }
+                gARTImageSavePlease[i] = FALSE;
             }
-            gARTImageSavePlease = FALSE;
+            gCallCountMarkerDetect[i]++;
         }
 
-		gCallCountMarkerDetect++; // Increment ARToolKit FPS counter.
-
-		// Detect the markers in the video frame.
-		if (arDetectMarker(gARHandle, gARTImage) < 0) {
-			exit(-1);
-		}
-
-		// Check through the marker_info array for highest confidence
-		// visible marker matching our preferred pattern.
-        int  i;
-		for (i = 0; i < 2; i++)
-		{
-            k = -1;
-            for (j = 0; j < gARHandle->marker_num; j++)
+		for (i = 0; i < NUMBER_OF_MARKERS; i++)
+        {
+            if (arDetectMarker(gARHandle[i], gARTImage[i]) < 0)
             {
-                if (gARHandle->markerInfo[j].id == object[i].patt_id)
+                exit(-1);
+            }
+            k[i] = -1;
+            printf("*********************");
+            printf("\n");
+            printf("marker_num222 is    ");
+            printf("%d  ",gARHandle[i]->marker_num);
+            printf("\n");
+            printf("*********************");
+            printf("\n");
+            printf("\n");
+            for (j[i] = 0; j[i] < gARHandle[i]->marker_num; j[i]++)
+            {
+                printf("*********************");
+                printf("\n");
+                printf("markerInfo222[");
+                printf("%d  ",j[i]);
+                printf("].id is   ");
+                printf("%d  ", gARHandle[i]->markerInfo[j[i]].id);
+                printf("\n");
+                printf("*********************");
+                printf("\n");
+                printf("\n");
+
+                if (gARHandle[i]->markerInfo[j[i]].id == object[i].patt_id)
                 {
-                    if (k == -1) k = j; // First marker detected.
-                    else if (gARHandle->markerInfo[j].cf > gARHandle->markerInfo[k].cf) k = j; // Higher confidence marker detected.
+                    if (k[i] == -1)
+                    {
+                        k[i] = j[i];
+                    }
+                    else if (gARHandle[i]->markerInfo[j[i]].cf > gARHandle[i]->markerInfo[k[i]].cf)
+                    {
+                        k[i] = j[i];
+                    }
                 }
             }
-
-
-            if (k >= 0)
+            if (k[i] == 0)
             {
                 // Get the transformation between the marker and the real camera into gPatt_trans.
-                err = arGetTransMatSquare(gAR3DHandle, &(gARHandle->markerInfo[k]), object[i].width, object[i].trans);
+                err[i] = arGetTransMatSquare(object[i].gAR3DHandle, &(gARHandle[i]->markerInfo[0]), object[i].width, object[i].trans);
                 object[i].gPatt_found = TRUE;
             }
             else
             {
                 object[i].gPatt_found = FALSE;
             }
-
-		// Tell GLUT the display has changed.
+        }
 		glutPostRedisplay();
-		}
 	}
 }
+
 
 //
 //	This function is called on events when the visibility of the
 //	GLUT window changes (including when it first becomes visible).
 //
-static void Visibility(int visible)
+static void Visibility(int visible0)
 {
-	if (visible == GLUT_VISIBLE) {
-		glutIdleFunc(mainLoop);
-	} else {
+	if (visible0 == GLUT_VISIBLE)
+	{
+		glutIdleFunc(mainLoop0);
+	}
+	else
+	{
 		glutIdleFunc(NULL);
 	}
 }
@@ -514,69 +925,192 @@ static void Reshape(int w, int h)
 //
 static void Display(void)
 {
-    ARdouble p[16];
-	ARdouble m[16];
+    // Select correct buffer for this context.
+    glDrawBuffer(GL_BACK);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT); // Clear the buffers for new frame.
 
-	// Select correct buffer for this context.
-	glDrawBuffer(GL_BACK);
-	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT); // Clear the buffers for new frame.
-
-    arglPixelBufferDataUpload(gArglSettings, gARTImage);
-	arglDispImage(gArglSettings);
-	gARTImage = NULL; // Invalidate image data.
-
-	// Projection transformation.
-	arglCameraFrustumRH(&(gCparamLT->param), VIEW_DISTANCE_MIN, VIEW_DISTANCE_MAX, p);
-	glMatrixMode(GL_PROJECTION);
-#ifdef ARDOUBLE_IS_FLOAT
-    glLoadMatrixf(p);
-#else
-    glLoadMatrixd(p);
-#endif
-	glMatrixMode(GL_MODELVIEW);
-
-	glEnable(GL_DEPTH_TEST);
-
-	// Viewing transformation.
-	glLoadIdentity();
-	// Lighting and geometry that moves with the camera should go here.
-	// (I.e. must be specified before viewing transformations.)
-	//none
-	int  i;
-    for (i = 0; i < 2; i++)
+    for (i = 0; i < NUMBER_OF_MARKERS; i++)
     {
-        if (object[i].gPatt_found)
-        {
-
-            // Calculate the camera position relative to the marker.
-            // Replace VIEW_SCALEFACTOR with 1.0 to make one drawing unit equal to 1.0 ARToolKit units (usually millimeters).
-            arglCameraViewRH((const ARdouble (*)[4])object[i].trans, m, VIEW_SCALEFACTOR);
-
-            int n,h=0;
-            printf("*******\n");
-            for(n=0;n<3;n++)
-            {
-                for(h=0;h<4;h++)
-                {
-                    printf("%.4f  ",object[i].trans[n][h]);
-                }
-                printf("\n");
-            }
-
+        arglPixelBufferDataUpload(gArglSettings[i], gARTImage[i]);
+        arglDispImage(gArglSettings[i]);
+        gARTImage[i] = NULL; // Invalidate image data.
+        // Projection transformation.
+        arglCameraFrustumRH(&(gCparamLT[i]->param), VIEW_DISTANCE_MIN, VIEW_DISTANCE_MAX, p[i]);
+    }
+    glMatrixMode(GL_PROJECTION);
+    for (i = 0; i < NUMBER_OF_MARKERS; i++)
+    {
 #ifdef ARDOUBLE_IS_FLOAT
-            glLoadMatrixf(m);
+        glLoadMatrixf(p[i]);
 #else
-            glLoadMatrixd(m);
+        glLoadMatrixd(p[i]);
+    }
 #endif
+    glMatrixMode(GL_MODELVIEW);
+    glEnable(GL_DEPTH_TEST);
+    // Viewing transformation.
+    glLoadIdentity();
+    // Lighting and geometry that moves with the camera should go here.
+    // (I.e. must be specified before viewing transformations.)
+    //none
 
-            // All lighting and geometry to be drawn relative to the marker goes here.
-            DrawLine();
-            DrawArrow();
 
-        } // gPatt_found
+
+
+
+    if (object[0].gPatt_found)
+    {
+        // Calculate the camera position relative to the marker.
+        // Replace VIEW_SCALEFACTOR with 1.0 to make one drawing unit equal to 1.0 ARToolKit units (usually millimeters).
+        arglCameraViewRH((const ARdouble (*)[4])object[0].trans, m[0], VIEW_SCALEFACTOR);
+        int n, h=0;
+        //printf("*******\n");
+        for(n=0;n<3;n++)
+        {
+            for(h=0;h<4;h++)
+            {
+                printf("%.4f  ",object[0].trans[n][h]);
+            }
+            printf("\n");
+        }
+#ifdef ARDOUBLE_IS_FLOAT
+        glLoadMatrixf(m[0]);
+#else
+        glLoadMatrixd(m[0]);
+#endif
+        // All lighting and geometry to be drawn relative to the marker goes here.
+        DrawLine();
+        DrawArrow1();
+    }   // gPatt_found
+
+
+
+
+
+    if (object[1].gPatt_found)
+    {
+        // Calculate the camera position relative to the marker.
+        // Replace VIEW_SCALEFACTOR with 1.0 to make one drawing unit equal to 1.0 ARToolKit units (usually millimeters).
+        arglCameraViewRH((const ARdouble (*)[4])object[1].trans, m[1], VIEW_SCALEFACTOR);
+        int n, h = 0;
+        //printf("*******\n");
+        for(n=0;n<3;n++)
+        {
+            for(h=0;h<4;h++)
+            {
+                printf("%.4f  ",object[1].trans[n][h]);
+            }
+            printf("\n");
+        }
+#ifdef ARDOUBLE_IS_FLOAT
+        glLoadMatrixf(m[1]);
+#else
+        glLoadMatrixd(m[1]);
+#endif
+        // All lighting and geometry to be drawn relative to the marker goes here.
+        DrawLine1();
+        DrawArrow2();
     }
 
-	// Any 2D overlays go here.
+
+    if (object[2].gPatt_found)
+    {
+        // Calculate the camera position relative to the marker.
+        // Replace VIEW_SCALEFACTOR with 1.0 to make one drawing unit equal to 1.0 ARToolKit units (usually millimeters).
+        arglCameraViewRH((const ARdouble (*)[4])object[2].trans, m[2], VIEW_SCALEFACTOR);
+        int n, h = 0;
+        //printf("*******\n");
+        for(n=0;n<3;n++)
+        {
+            for(h=0;h<4;h++)
+            {
+                printf("%.4f  ",object[2].trans[n][h]);
+            }
+            printf("\n");
+        }
+#ifdef ARDOUBLE_IS_FLOAT
+        glLoadMatrixf(m[2]);
+#else
+        glLoadMatrixd(m[2]);
+#endif
+        // All lighting and geometry to be drawn relative to the marker goes here.
+        DrawArrow2();
+        DrawLine2();
+    }
+
+
+    if (object[3].gPatt_found)
+    {
+        // Calculate the camera position relative to the marker.
+        // Replace VIEW_SCALEFACTOR with 1.0 to make one drawing unit equal to 1.0 ARToolKit units (usually millimeters).
+        arglCameraViewRH((const ARdouble (*)[4])object[3].trans, m[3], VIEW_SCALEFACTOR);
+        int n, h = 0;
+        //printf("*******\n");
+        for(n=0;n<3;n++)
+        {
+            for(h=0;h<4;h++)
+            {
+                printf("%.4f  ",object[3].trans[n][h]);
+            }
+            printf("\n");
+        }
+#ifdef ARDOUBLE_IS_FLOAT
+        glLoadMatrixf(m[2]);
+#else
+        glLoadMatrixd(m[3]);
+#endif
+        // All lighting and geometry to be drawn relative to the marker goes here.
+        DrawArrow2();
+        DrawLine3();
+    }
+
+
+    if (object[4].gPatt_found)
+    {
+        // Calculate the camera position relative to the marker.
+        // Replace VIEW_SCALEFACTOR with 1.0 to make one drawing unit equal to 1.0 ARToolKit units (usually millimeters).
+        arglCameraViewRH((const ARdouble (*)[4])object[4].trans, m[4], VIEW_SCALEFACTOR);
+        int n, h = 0;
+        //printf("*******\n");
+        for(n=0;n<3;n++)
+        {
+            for(h=0;h<4;h++)
+            {
+                printf("%.4f  ",object[4].trans[n][h]);
+            }
+            printf("\n");
+        }
+#ifdef ARDOUBLE_IS_FLOAT
+        glLoadMatrixf(m[2]);
+#else
+        glLoadMatrixd(m[4]);
+#endif
+        // All lighting and geometry to be drawn relative to the marker goes here.
+        DrawArrow2();
+        DrawLine4();
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    // Any 2D overlays go here.
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
     glOrtho(0, (GLdouble)windowWidth, 0, (GLdouble)windowHeight, -1.0, 1.0);
@@ -584,80 +1118,95 @@ static void Display(void)
     glLoadIdentity();
     glDisable(GL_LIGHTING);
     glDisable(GL_DEPTH_TEST);
-
-    //
     // Draw help text and mode.
     //
     if (gShowMode)
     {
         printMode();
     }
-    if (gShowHelp) {
-        if (gShowHelp == 1) {
+    if (gShowHelp)
+    {
+        if (gShowHelp == 1)
+        {
             printHelpKeys();
         }
     }
-
-	glutSwapBuffers();
+    glutSwapBuffers();
 }
+
+
+
 
 int main(int argc, char** argv)
 {
 	char glutGamemode[32];
 	char cparam_name[] = "Data/camera_para.dat";
 	char vconf[] = "-device=LinuxV4L2";
-	char patt_name[]  = "Data/hiro.patt";
+	//char *patt_name[2] = { "Data/kanji.patt","Data/hiro.patt"};
 
     //
 	// Library inits.
 	//
 
 	glutInit(&argc, argv);
+    if (!openVideo(vconf))
+    {
+        exit(-1);
+    }
 
-	//
-	// Video setup.
-	//
-
-	if (!setupCamera(cparam_name, vconf, &gCparamLT, &gARHandle, &gAR3DHandle)) {
-		ARLOGe("main(): Unable to set up AR camera.\n");
-		exit(-1);
+    for (i = 0; i < NUMBER_OF_MARKERS; i++)
+    {
+        if (!setupCamera1(cparam_name, &gCparamLT[i], &gARHandle[i], &object[i].gAR3DHandle))
+        {
+            ARLOGe("main(): Unable to set up AR camera.\n");
+            exit(-1);
+        }
 	}
 
-	//
-	// Graphics setup.
-	//
+    if (!capStart())
+    {
+        exit(-1);
+    }
 
 	// Set up GL context(s) for OpenGL to draw into.
 	glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGBA | GLUT_DEPTH);
-	if (!windowed) {
+	if (!windowed)
+	{
 		if (windowRefresh) sprintf(glutGamemode, "%ix%i:%i@%i", windowWidth, windowHeight, windowDepth, windowRefresh);
 		else sprintf(glutGamemode, "%ix%i:%i", windowWidth, windowHeight, windowDepth);
 		glutGameModeString(glutGamemode);
 		glutEnterGameMode();
-	} else {
+	}
+
+	else
+	{
 		glutInitWindowSize(windowWidth, windowHeight);
 		glutCreateWindow(argv[0]);
 	}
 
-	// Setup ARgsub_lite library for current OpenGL context.
-	if ((gArglSettings = arglSetupForCurrentContext(&(gCparamLT->param), arVideoGetPixelFormat())) == NULL) {
-		ARLOGe("main(): arglSetupForCurrentContext() returned error.\n");
-		cleanup();
-		exit(-1);
-	}
-        arglSetupDebugMode(gArglSettings, gARHandle);
-	arUtilTimerReset();
 
-	// Load marker(s).
-	int  i;
-	for (i = 0; i < 2; i++)
-	{
-        if (!setupMarker(patt_name, &object[i].patt_id, gARHandle, &gARPattHandle)) {
-            ARLOGe("main(): Unable to set up AR marker.\n");
+    for (i = 0; i < NUMBER_OF_MARKERS; i++)
+    {
+    	if ((gArglSettings[i] = arglSetupForCurrentContext(&(gCparamLT[i]->param), arVideoGetPixelFormat())) == NULL)
+        {
+            ARLOGe("main(): arglSetupForCurrentContext() returned error.\n");
             cleanup();
             exit(-1);
         }
-	}
+        arglSetupDebugMode(gArglSettings[i], gARHandle[i]);
+        arUtilTimerReset();
+    }
+
+	// Setup ARgsub_lite library for current OpenGL context.
+    for (i = 0; i < NUMBER_OF_MARKERS; i++)
+    {
+        if (!setupMarker(object[i].patt_name, &object[i].patt_id, gARHandle[i], &gARPattHandle[i]))
+        {
+            ARLOGe("main(): Unable to set up AR marker0.\n");
+            cleanup();
+            exit(-1);
+        }
+    }
 
 	// Register GLUT event-handling callbacks.
 	// NB: mainLoop() is registered by Visibility.
@@ -665,9 +1214,7 @@ int main(int argc, char** argv)
 	glutReshapeFunc(Reshape);
 	glutVisibilityFunc(Visibility);
 	glutKeyboardFunc(Keyboard);
-
 	glutMainLoop();
-
 	return (0);
 }
 
@@ -682,14 +1229,23 @@ static void print(const char *text, const float x, const float y, int calculateX
 
     if (!text) return;
 
-    if (calculateXFromRightEdge) {
+    if (calculateXFromRightEdge)
+    {
         x0 = windowWidth - x - (float)glutBitmapLength(GLUT_BITMAP_HELVETICA_10, (const unsigned char *)text);
-    } else {
+    }
+
+    else
+    {
         x0 = x;
     }
-    if (calculateYFromTopEdge) {
+
+    if (calculateYFromTopEdge)
+    {
         y0 = windowHeight - y - 10.0f;
-    } else {
+    }
+
+    else
+    {
         y0 = y;
     }
     glRasterPos2f(x0, y0);
@@ -724,7 +1280,8 @@ static void printHelpKeys()
 {
     int i;
     GLfloat  w, bw, bh;
-    const char *helpText[] = {
+    const char *helpText[] =
+    {
         "Keys:\n",
         " ? or /        Show/hide this help.",
         " q or [esc]    Quit program.",
@@ -738,7 +1295,8 @@ static void printHelpKeys()
 #define helpTextLineCount (sizeof(helpText)/sizeof(char *))
 
     bw = 0.0f;
-    for (i = 0; i < helpTextLineCount; i++) {
+    for (i = 0; i < helpTextLineCount; i++)
+    {
         w = (float)glutBitmapLength(GLUT_BITMAP_HELVETICA_10, (unsigned char *)helpText[i]);
         if (w > bw) bw = w;
     }
@@ -751,7 +1309,6 @@ static void printHelpKeys()
 static void printMode()
 {
     int len, thresh, line, mode, xsize, ysize;
-    AR_LABELING_THRESH_MODE threshMode;
     ARdouble tempF;
     char text[256], *text_p;
 
@@ -760,7 +1317,11 @@ static void printMode()
 
     // Image size and processing mode.
     arVideoGetSize(&xsize, &ysize);
-    arGetImageProcMode(gARHandle, &mode);
+    for (i = 0; i < NUMBER_OF_MARKERS; i++)
+    {
+        arGetImageProcMode(gARHandle[i], &mode);
+    }
+
 	if (mode == AR_IMAGE_PROC_FRAME_IMAGE) text_p = "full frame";
 	else text_p = "even field only";
     snprintf(text, sizeof(text), "Processing %dx%d video frames %s", xsize, ysize, text_p);
@@ -768,18 +1329,35 @@ static void printMode()
     line++;
 
     // Threshold mode, and threshold, if applicable.
-    arGetLabelingThreshMode(gARHandle, &threshMode);
-    switch (threshMode) {
-        case AR_LABELING_THRESH_MODE_MANUAL: text_p = "MANUAL"; break;
-        case AR_LABELING_THRESH_MODE_AUTO_MEDIAN: text_p = "AUTO_MEDIAN"; break;
-        case AR_LABELING_THRESH_MODE_AUTO_OTSU: text_p = "AUTO_OTSU"; break;
-        case AR_LABELING_THRESH_MODE_AUTO_ADAPTIVE: text_p = "AUTO_ADAPTIVE"; break;
-        case AR_LABELING_THRESH_MODE_AUTO_BRACKETING: text_p = "AUTO_BRACKETING"; break;
-        default: text_p = "UNKNOWN"; break;
+    for (i = 0; i < NUMBER_OF_MARKERS; i++)
+    {
+        arGetLabelingThreshMode(gARHandle[i], &threshMode[i]);
+        switch (threshMode[i])
+        {
+            case AR_LABELING_THRESH_MODE_MANUAL: text_p = "MANUAL"; break;
+            case AR_LABELING_THRESH_MODE_AUTO_MEDIAN: text_p = "AUTO_MEDIAN"; break;
+            case AR_LABELING_THRESH_MODE_AUTO_OTSU: text_p = "AUTO_OTSU"; break;
+            case AR_LABELING_THRESH_MODE_AUTO_ADAPTIVE: text_p = "AUTO_ADAPTIVE"; break;
+            case AR_LABELING_THRESH_MODE_AUTO_BRACKETING: text_p = "AUTO_BRACKETING"; break;
+            default: text_p = "UNKNOWN"; break;
+        }
     }
+
     snprintf(text, sizeof(text), "Threshold mode: %s", text_p);
-    if (threshMode != AR_LABELING_THRESH_MODE_AUTO_ADAPTIVE) {
-        arGetLabelingThresh(gARHandle, &thresh);
+
+
+
+
+    if (threshMode[0] != AR_LABELING_THRESH_MODE_AUTO_ADAPTIVE
+     || threshMode[1] != AR_LABELING_THRESH_MODE_AUTO_ADAPTIVE
+     || threshMode[2] != AR_LABELING_THRESH_MODE_AUTO_ADAPTIVE)
+
+
+    {
+        for (i = 0; i < NUMBER_OF_MARKERS; i++)
+        {
+            arGetLabelingThresh(gARHandle[i], &thresh);
+        }
         len = (int)strlen(text);
         snprintf(text + len, sizeof(text) - len, ", thresh=%d", thresh);
     }
@@ -787,10 +1365,17 @@ static void printMode()
     line++;
 
     // Border size, image processing mode, pattern detection mode.
-    arGetBorderSize(gARHandle, &tempF);
+    for (i = 0; i < NUMBER_OF_MARKERS; i++)
+    {
+        arGetBorderSize(gARHandle[i], &tempF);
+    }
     snprintf(text, sizeof(text), "Border: %0.1f%%", tempF*100.0);
-    arGetPatternDetectionMode(gARHandle, &mode);
-    switch (mode) {
+    for (i = 0; i < NUMBER_OF_MARKERS; i++)
+    {
+         arGetPatternDetectionMode(gARHandle[i], &mode);
+    }
+    switch (mode)
+    {
         case AR_TEMPLATE_MATCHING_COLOR: text_p = "Colour template (pattern)"; break;
         case AR_TEMPLATE_MATCHING_MONO: text_p = "Mono template (pattern)"; break;
         case AR_MATRIX_CODE_DETECTION: text_p = "Matrix (barcode)"; break;
@@ -798,6 +1383,7 @@ static void printMode()
         case AR_TEMPLATE_MATCHING_MONO_AND_MATRIX: text_p = "Mono template + Matrix (2 pass, pattern + barcode "; break;
         default: text_p = "UNKNOWN"; break;
     }
+
     len = (int)strlen(text);
     snprintf(text + len, sizeof(text) - len, ", Pattern detection mode: %s", text_p);
     print(text, 2.0f,  (line - 1)*12.0f + 2.0f, 0, 1);
