@@ -1,4 +1,4 @@
-/*
+/* this is a test
  *  simpleLite.c
  *
  *  Some code to demonstrate use of ARToolKit.
