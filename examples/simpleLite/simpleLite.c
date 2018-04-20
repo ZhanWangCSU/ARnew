@@ -153,6 +153,14 @@ OBJECT_T  object[NUMBER_OF_MARKERS] = {{ NULL,   "Data/kanji.patt",  FALSE, 0 , 
 // ============================================================================
 
 // Something to look at, draw a rotating colour cube.
+static void DrawPoint(float x, float y, float z){
+    glBegin(GL_POINTS);
+    glVertex3f(x, y, z);
+    glEnd();
+
+}
+
+
 static void DrawLine(void)
 {
 	const GLfloat lineWidth = 100.0;
@@ -1221,7 +1229,6 @@ int main(int argc, char** argv)
 //
 // The following functions provide the onscreen help text and mode info.
 //
-
 static void print(const char *text, const float x, const float y, int calculateXFromRightEdge, int calculateYFromTopEdge)
 {
     int i, len;
